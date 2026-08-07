@@ -1,1 +1,1 @@
-Run Android 16 installation diagnostic with a fixed explicit AVD home.
+Run Android 16 installation verification for collision-free public Health Bridge v0.3.4.
