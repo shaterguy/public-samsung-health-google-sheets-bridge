@@ -1,0 +1,221 @@
+name: Android 16 Package Install Diagnostic
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/install-smoke-trigger-v2.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: healthbridge-install-diagnostic-v2
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: v0.3.3
+  APK_NAME: HealthBridge-v0.3.3.apk
+  PACKAGE_NAME: com.example.healthbridge
+  AVD_NAME: healthbridge-install-diagnostic
+
+jobs:
+  install-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Android 16 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            'platforms;android-36' \
+            'system-images;android-36;google_apis;x86_64'
+          test -x "$ANDROID_HOME/emulator/emulator"
+          echo no | avdmanager create avd \
+            --force \
+            --name "$AVD_NAME" \
+            --package 'system-images;android-36;google_apis;x86_64' \
+            --device pixel_6
+
+      - name: Boot Android 16 with bounded wait
+        id: boot
+        shell: bash
+        run: |
+          set +e
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          ACCEL=off
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            ACCEL=on
+          fi
+          echo "accel=$ACCEL" | tee emulator-accel.txt
+          "$ANDROID_HOME/emulator/emulator" "@$AVD_NAME" \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -gpu swiftshader_indirect \
+            -accel "$ACCEL" \
+            -no-snapshot \
+            -wipe-data \
+            > emulator.log 2>&1 &
+          EMULATOR_PID=$!
+          echo "$EMULATOR_PID" > emulator-pid.txt
+
+          DEVICE_READY=0
+          for i in $(seq 1 90); do
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              break
+            fi
+            if adb devices | awk 'NR>1 && $2=="device" {found=1} END {exit !found}'; then
+              DEVICE_READY=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$DEVICE_READY" -ne 1 ]; then
+            echo 'device_not_ready' | tee boot-result.txt
+            tail -n 500 emulator.log > emulator-tail.txt 2>/dev/null || true
+            echo 'boot_status=failed' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          BOOT_COMPLETE=0
+          for i in $(seq 1 90); do
+            VALUE="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            if [ "$VALUE" = "1" ]; then
+              BOOT_COMPLETE=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$BOOT_COMPLETE" -ne 1 ]; then
+            echo 'boot_not_completed' | tee boot-result.txt
+            tail -n 500 emulator.log > emulator-tail.txt 2>/dev/null || true
+            echo 'boot_status=failed' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo 'success' | tee boot-result.txt
+          adb shell getprop ro.build.version.release | tee emulator-android-version.txt
+          adb shell getprop ro.build.version.sdk | tee emulator-api-level.txt
+          adb shell getprop ro.product.cpu.abi | tee emulator-abi.txt
+          echo 'boot_status=success' >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Download verified public APK
+        if: steps.boot.outputs.boot_status == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$APK_NAME"
+          test -s "$APK_NAME"
+          sha256sum "$APK_NAME" | tee downloaded-apk-sha256.txt
+
+      - name: Install APK through Android PackageManager
+        id: install
+        if: steps.boot.outputs.boot_status == 'success'
+        shell: bash
+        run: |
+          set +e
+          adb logcat -c >/dev/null 2>&1 || true
+          adb install --user 0 -r -t "$APK_NAME" 2>&1 | tee adb-install-output.txt
+          CODE=${PIPESTATUS[0]}
+          echo "exit_code=$CODE" | tee adb-install-exit-code.txt
+          if [ "$CODE" -eq 0 ]; then
+            adb shell pm path "$PACKAGE_NAME" | tee package-path.txt
+            adb shell dumpsys package "$PACKAGE_NAME" | grep -E 'versionCode=|versionName=' | head -n 6 | tee package-version.txt
+            echo 'install_status=success' >> "$GITHUB_OUTPUT"
+          else
+            adb shell logcat -d -b all | grep -Ei 'PackageInstaller|PackageManager|INSTALL_|healthbridge|com.example.healthbridge' | tail -n 1200 > package-install-logcat.txt || true
+            echo 'install_status=failed' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$CODE"
+
+      - name: Capture diagnostics
+        if: always()
+        shell: bash
+        run: |
+          adb shell dumpsys package "$PACKAGE_NAME" > package-dumpsys.txt 2>&1 || true
+          adb shell logcat -d -b all | grep -Ei 'PackageInstaller|PackageManager|INSTALL_|healthbridge|com.example.healthbridge' | tail -n 1200 > package-install-logcat.txt || true
+          tail -n 500 emulator.log > emulator-tail.txt 2>/dev/null || true
+
+      - name: Record diagnostic result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=boot_failed
+          if grep -q '^Success' adb-install-output.txt 2>/dev/null; then
+            STATUS=install_success
+          elif [ -f adb-install-output.txt ]; then
+            STATUS=install_failed
+          fi
+          INSTALL_OUTPUT="$(jq -Rs . < adb-install-output.txt 2>/dev/null || printf 'null')"
+          BOOT_RESULT="$(tr -d '\r\n' < boot-result.txt 2>/dev/null || true)"
+          API_LEVEL="$(tr -d '\r\n' < emulator-api-level.txt 2>/dev/null || true)"
+          APK_SHA="$(awk '{print $1}' downloaded-apk-sha256.txt 2>/dev/null || true)"
+          cat > .github/install-smoke-fixed-result.json <<EOF
+          {
+            "run_id": "$GITHUB_RUN_ID",
+            "status": "$STATUS",
+            "boot_result": "$BOOT_RESULT",
+            "android_api": "$API_LEVEL",
+            "apk_sha256": "$APK_SHA",
+            "install_output": $INSTALL_OUTPUT,
+            "completed_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/install-smoke-fixed-result.json
+          git commit -m 'Record Android 16 package install diagnostic' || exit 0
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthbridge-android16-package-install-diagnostic
+          path: |
+            adb-install-output.txt
+            adb-install-exit-code.txt
+            package-path.txt
+            package-version.txt
+            package-dumpsys.txt
+            package-install-logcat.txt
+            emulator.log
+            emulator-tail.txt
+            emulator-android-version.txt
+            emulator-api-level.txt
+            emulator-abi.txt
+            emulator-accel.txt
+            boot-result.txt
+            downloaded-apk-sha256.txt
+            .github/install-smoke-fixed-result.json
+          if-no-files-found: ignore
+          retention-days: 7
