@@ -47,7 +47,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/release-observed-result.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Record observed public Health Bridge release result"
-            git push
+          if git diff --cached --quiet; then
+            exit 0
           fi
+          git commit -m "Record observed public Health Bridge release result"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Could not publish observed release result after retries.' >&2
+          exit 1
