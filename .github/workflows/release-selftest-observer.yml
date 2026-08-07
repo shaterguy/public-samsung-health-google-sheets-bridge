@@ -1,0 +1,53 @@
+name: Observe Android Stable Release
+
+on:
+  workflow_run:
+    workflows: ["Android Stable Release"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Record observed release result
+        shell: bash
+        env:
+          OBSERVED_RUN_ID: ${{ github.event.workflow_run.id }}
+          OBSERVED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          OBSERVED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          cat > .github/release-observed-result.json <<EOF
+          {
+            "repository": "$GITHUB_REPOSITORY",
+            "observed_run_id": "$OBSERVED_RUN_ID",
+            "source_sha": "$OBSERVED_HEAD_SHA",
+            "workflow_conclusion": "$OBSERVED_CONCLUSION",
+            "mode": "persistent-public-signing",
+            "public_certificate_sha256": "98ec08ec0640003688d3c99a608cba45c75c0caea33e63d286fc640e4f454292",
+            "public_certificate_sha1": "e31ae124f93d06f1784fac1f1eb6241b08bf7af2",
+            "private_to_public_reinstall_required": true,
+            "future_public_updates_supported_after_successful_baseline": true,
+            "external_private_repo_dependency": false,
+            "repository_secret_name": "HEALTHBRIDGE_PUBLIC_SIGNING_BUNDLE_BASE64",
+            "completed_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/release-observed-result.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Record observed public Health Bridge release result"
+            git push
+          fi
