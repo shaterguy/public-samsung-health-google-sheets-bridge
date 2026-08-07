@@ -113,20 +113,29 @@ jobs:
           (cd dist && sha256sum "$APK_NAME" > "$CHECKSUM_NAME")
           git archive --format=zip --output="dist/$SOURCE_NAME" "$GITHUB_SHA"
 
-      - name: Publish GitHub Release
+      - name: Publish or refresh GitHub Release
         shell: bash
         run: |
           set -euo pipefail
-          gh release delete "$RELEASE_TAG" --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh release create "$RELEASE_TAG" \
-            "dist/$APK_NAME" \
-            "dist/$CHECKSUM_NAME" \
-            "dist/$SOURCE_NAME" \
-            dist/signing-certificate.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Health Bridge 0.3.3" \
-            --notes "Public signing baseline. Uninstall private 0.3.2 or earlier once before installing this release. Public 0.3.3 and later use the same signing identity for in-place updates."
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist/$APK_NAME" \
+              "dist/$CHECKSUM_NAME" \
+              "dist/$SOURCE_NAME" \
+              dist/signing-certificate.txt \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" \
+              "dist/$APK_NAME" \
+              "dist/$CHECKSUM_NAME" \
+              "dist/$SOURCE_NAME" \
+              dist/signing-certificate.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Health Bridge 0.3.3" \
+              --notes "Public signing baseline. Uninstall private 0.3.2 or earlier once before installing this release. Public 0.3.3 and later use the same signing identity for in-place updates."
+          fi
 
       - name: Read back and verify published release
         shell: bash
