@@ -1,0 +1,40 @@
+name: Android CI Observer
+
+on:
+  workflow_run:
+    workflows: ["Android CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record CI result
+        shell: bash
+        env:
+          OBSERVED_RUN_ID: ${{ github.event.workflow_run.id }}
+          OBSERVED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          OBSERVED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          cat > .github/ci-selftest-report.json <<EOF
+          {
+            "repository": "$GITHUB_REPOSITORY",
+            "observed_run_id": "$OBSERVED_RUN_ID",
+            "source_sha": "$OBSERVED_HEAD_SHA",
+            "workflow_conclusion": "$OBSERVED_CONCLUSION",
+            "public_source_build_independent": true,
+            "external_private_repo_dependency": false,
+            "completed_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/ci-selftest-report.json
+          git commit -m "Record public Health Bridge CI result"
+          git push
