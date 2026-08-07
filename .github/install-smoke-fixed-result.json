@@ -1,0 +1,9 @@
+{
+  "run_id": "31167073601",
+  "status": "boot_failed",
+  "boot_result": "device_not_ready",
+  "android_api": "",
+  "apk_sha256": "",
+  "install_output": null,
+  "completed_at_utc": "2026-08-07T09:44:17Z"
+}
