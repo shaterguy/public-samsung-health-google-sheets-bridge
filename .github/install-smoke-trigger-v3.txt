@@ -1,0 +1,1 @@
+Run Android 16 installation diagnostic with a fixed explicit AVD home.
