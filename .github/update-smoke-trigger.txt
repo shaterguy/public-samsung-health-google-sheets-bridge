@@ -1,0 +1,1 @@
+Run in-place update verification from Health Bridge 0.3.4 to 0.3.5.
