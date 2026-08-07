@@ -11,10 +11,12 @@ The public repository is considered build-verified only when GitHub Actions comp
 - APK signature verification against the fixed public certificate
 - package, version code and version name verification
 - SHA-256 checksum generation
-- GitHub Release publication
+- GitHub Release publication or safe asset refresh for an existing release
 - release asset re-download and verification
 
 The persistent public signing secret has been provisioned. The release workflow records a successful end-to-end verification in `.github/release-selftest-report.json`; that report, not secret presence alone, is the completion criterion. A separate observer records every stable-release conclusion in `.github/release-observed-result.json` so failures are not mistaken for incomplete runs.
+
+Release validation reruns do not delete an existing stable release. They refresh its assets in place, then download and verify them again.
 
 Physical-device Health Connect permission and Google OAuth are separate runtime checks. Because public 0.3.3 uses a new signing certificate, its package and SHA-1 must be registered as an Android OAuth client before Google Sheets authorization on the installed public APK can be verified.
 
