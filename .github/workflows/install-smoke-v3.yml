@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RELEASE_TAG: v0.3.4
-  APK_NAME: HealthBridge-v0.3.4.apk
+  RELEASE_TAG: v0.3.5
+  APK_NAME: HealthBridge-v0.3.5.apk
   PACKAGE_NAME: com.personal.healthbridge.reinstall
   AVD_NAME: healthbridge-install-diagnostic-v3
 
@@ -176,7 +176,7 @@ jobs:
         with:
           name: healthbridge-install-diagnostic-v3
           path: |
-            HealthBridge-v0.3.4.apk
+            HealthBridge-v0.3.5.apk
             adb-install-output.txt
             adb-install-exit-code.txt
             package-path.txt
