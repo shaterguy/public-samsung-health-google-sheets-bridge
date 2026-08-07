@@ -1,0 +1,1 @@
+Run corrected Android 16 package installation diagnostic on the current public v0.3.3 APK.
