@@ -8,7 +8,6 @@ import com.example.healthbridge.health.HealthPermissions
 import com.example.healthbridge.health.HealthSyncRepository
 import com.example.healthbridge.sync.SyncPolicy
 import com.example.healthbridge.sync.SyncWorker
-import com.google.android.gms.auth.api.identity.AuthorizationResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,24 +87,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun onGoogleAuthorized(result: AuthorizationResult) {
+    fun onGoogleAuthorized(accountEmail: String) {
         if (repository.settings.spreadsheetId.length < 20) {
             onGoogleAuthorizationError("먼저 Google 스프레드시트 ID를 저장해 주세요.")
             return
         }
-        if (result.hasResolution() || result.accessToken.isNullOrBlank()) {
-            onGoogleAuthorizationError("Google Sheets 승인이 완료되지 않았습니다.")
-            return
-        }
-        val email = result.toGoogleSignInAccount()?.email
         repository.settings.googleAuthorized = true
-        repository.settings.googleAccountEmail = email
+        repository.settings.googleAccountEmail = accountEmail
         if (repository.settings.syncEnabled) {
             SyncWorker.schedule(getApplication())
         }
         _state.value = _state.value.copy(
             googleAuthorized = true,
-            googleAccountEmail = email,
+            googleAccountEmail = accountEmail,
             message = "Google Sheets 연결을 승인했습니다.",
         )
     }
