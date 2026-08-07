@@ -1,0 +1,9 @@
+{
+  "run_id": "31167321819",
+  "status": "install_success",
+  "boot_result": "success",
+  "android_api": "36",
+  "apk_sha256": "c0201b8bc47b6af7ff647f911359e4bda833a8993699c6298e8a63d7f51ee184",
+  "install_output": "Performing Streamed Install\nSuccess\n",
+  "completed_at_utc": "2026-08-07T09:48:53Z"
+}
