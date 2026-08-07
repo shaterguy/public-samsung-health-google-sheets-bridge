@@ -9,11 +9,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = providers.gradleProperty("applicationId").getOrElse("com.example.healthbridge")
+        applicationId = providers.gradleProperty("applicationId").getOrElse("com.personal.healthbridge.reinstall")
         minSdk = 28
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.3.3"
+        versionCode = 10
+        versionName = "0.3.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
