@@ -1,0 +1,145 @@
+name: Android Update 0.3.4 to 0.3.5 Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/update-smoke-trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: healthbridge-update-034-035
+  cancel-in-progress: true
+
+env:
+  OLD_TAG: v0.3.4
+  OLD_APK: HealthBridge-v0.3.4.apk
+  NEW_TAG: v0.3.5
+  NEW_APK: HealthBridge-v0.3.5.apk
+  PACKAGE_NAME: com.personal.healthbridge.reinstall
+  AVD_NAME: healthbridge-update-diagnostic
+
+jobs:
+  update-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Prepare Android 16 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'emulator' 'system-images;android-36;google_apis;x86_64'
+          AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo no | avdmanager create avd --force --name "$AVD_NAME" --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx "$AVD_NAME"
+
+      - name: Boot emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          ACCEL=off
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ACCEL=on; fi
+          "$ANDROID_HOME/emulator/emulator" "@$AVD_NAME" -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel "$ACCEL" -no-snapshot -wipe-data > emulator.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 90); do
+            if ! kill -0 "$PID" 2>/dev/null; then tail -n 300 emulator.log; exit 1; fi
+            [ "$(adb get-state 2>/dev/null || true)" = "device" ] && break
+            sleep 2
+          done
+          for i in $(seq 1 90); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+
+      - name: Download old and new public APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir apks
+          gh release download "$OLD_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$OLD_APK" --dir apks
+          gh release download "$NEW_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$NEW_APK" --dir apks
+          test -s "apks/$OLD_APK"
+          test -s "apks/$NEW_APK"
+          sha256sum "apks/$OLD_APK" "apks/$NEW_APK" | tee apk-sha256.txt
+
+      - name: Install 0.3.4 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb install --user 0 "apks/$OLD_APK" 2>&1 | tee install-old.txt
+          grep -q '^Success' install-old.txt
+          adb shell dumpsys package "$PACKAGE_NAME" | grep -E 'versionCode=|versionName=' | head -n 4 | tee version-old.txt
+          grep -q 'versionName=0.3.4' version-old.txt
+
+      - name: Update in place to 0.3.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb install --user 0 -r "apks/$NEW_APK" 2>&1 | tee install-update.txt
+          grep -q '^Success' install-update.txt
+          adb shell dumpsys package "$PACKAGE_NAME" | grep -E 'versionCode=|versionName=' | head -n 4 | tee version-new.txt
+          grep -q 'versionName=0.3.5' version-new.txt
+
+      - name: Record update result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=failed
+          if grep -q '^Success' install-old.txt 2>/dev/null && grep -q '^Success' install-update.txt 2>/dev/null && grep -q 'versionName=0.3.5' version-new.txt 2>/dev/null; then STATUS=update_success; fi
+          cat > .github/update-smoke-result.json <<EOF
+          {
+            "run_id": "$GITHUB_RUN_ID",
+            "from_version": "0.3.4",
+            "to_version": "0.3.5",
+            "package": "$PACKAGE_NAME",
+            "status": "$STATUS",
+            "old_install_output": $(jq -Rs . < install-old.txt 2>/dev/null || printf 'null'),
+            "update_install_output": $(jq -Rs . < install-update.txt 2>/dev/null || printf 'null'),
+            "completed_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/update-smoke-result.json
+          git commit -m 'Record Health Bridge 0.3.4 to 0.3.5 update diagnostic' || exit 0
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthbridge-update-034-to-035
+          path: |
+            install-old.txt
+            install-update.txt
+            version-old.txt
+            version-new.txt
+            apk-sha256.txt
+            emulator.log
+            .github/update-smoke-result.json
+          if-no-files-found: ignore
+          retention-days: 7
