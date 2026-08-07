@@ -99,10 +99,17 @@ jobs:
           "$BT/apksigner" sign \
             --key /tmp/healthbridge-public-signing/key.pk8 \
             --cert /tmp/healthbridge-public-signing/cert.pem \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
             --out "dist/$APK_NAME" \
             dist/app-aligned.apk
           rm dist/app-aligned.apk
           "$BT/apksigner" verify --verbose --print-certs "dist/$APK_NAME" | tee dist/signing-certificate.txt
+          grep -q 'Verified using v1 scheme (JAR signing): true' dist/signing-certificate.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' dist/signing-certificate.txt
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' dist/signing-certificate.txt
           NORMALIZED="$(grep -i 'Signer #1 certificate SHA-256 digest:' dist/signing-certificate.txt | head -n1 | sed 's/.*: //' | tr -d ':' | tr 'A-F' 'a-f')"
           test "$NORMALIZED" = "$EXPECTED_PUBLIC_CERT_SHA256"
           "$BT/aapt" dump badging "dist/$APK_NAME" > dist/apk-badging.txt
@@ -151,6 +158,9 @@ jobs:
           unzip -t "$SOURCE_NAME" >/dev/null
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs "$APK_NAME" > "$GITHUB_WORKSPACE/release-signature-readback.txt"
+          grep -q 'Verified using v1 scheme (JAR signing): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
+          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
           NORMALIZED="$(grep -i 'Signer #1 certificate SHA-256 digest:' "$GITHUB_WORKSPACE/release-signature-readback.txt" | head -n1 | sed 's/.*: //' | tr -d ':' | tr 'A-F' 'a-f')"
           test "$NORMALIZED" = "$EXPECTED_PUBLIC_CERT_SHA256"
           "$BT/aapt" dump badging "$APK_NAME" > "$GITHUB_WORKSPACE/release-badging-readback.txt"
@@ -172,6 +182,7 @@ jobs:
             "mode": "persistent-public-signing",
             "public_certificate_sha256": "$EXPECTED_PUBLIC_CERT_SHA256",
             "public_certificate_sha1": "$EXPECTED_PUBLIC_CERT_SHA1",
+            "apk_signature_schemes": "v1+v2+v3",
             "unit_tests": "success",
             "signed_apk": "verified",
             "release_readback": "verified",
