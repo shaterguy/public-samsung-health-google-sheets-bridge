@@ -1,12 +1,12 @@
 {
-  "run_id": "31168367326",
-  "release_tag": "v0.3.4",
-  "apk_name": "HealthBridge-v0.3.4.apk",
+  "run_id": "31172143376",
+  "release_tag": "v0.3.5",
+  "apk_name": "HealthBridge-v0.3.5.apk",
   "package": "com.personal.healthbridge.reinstall",
   "status": "install_success",
   "boot_result": "success",
   "android_api": "36",
-  "apk_sha256": "7d1d0d7a217dbabd6230ed6f373e63bd2d6d3b5d1b776db50890b9df1f4feef9",
+  "apk_sha256": "3ec34d1800d3adecff47e030f1a6b8a738239b4cc941e537dc681046acad7bcb",
   "install_output": "Performing Streamed Install\nSuccess\n",
-  "completed_at_utc": "2026-08-07T10:03:57Z"
+  "completed_at_utc": "2026-08-07T10:59:54Z"
 }
