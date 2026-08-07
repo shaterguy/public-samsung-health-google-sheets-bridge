@@ -211,3 +211,109 @@ jobs:
         if: always()
         shell: bash
         run: rm -rf /tmp/healthbridge-public-signing
+
+  install-smoke:
+    name: Clean install on Android ${{ matrix.api }}
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [35, 36]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AVD_NAME: healthbridge-install-smoke
+    steps:
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            "platforms;android-${{ matrix.api }}" \
+            "system-images;android-${{ matrix.api }};google_apis;x86_64"
+          echo no | avdmanager create avd \
+            --force \
+            --name "$AVD_NAME" \
+            --package "system-images;android-${{ matrix.api }};google_apis;x86_64" \
+            --device pixel_6
+
+      - name: Boot clean emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          nohup emulator "@$AVD_NAME" \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -gpu swiftshader_indirect \
+            -no-snapshot \
+            -wipe-data \
+            > emulator.log 2>&1 &
+          adb wait-for-device
+          for i in $(seq 1 180); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell getprop ro.build.version.release | tee emulator-android-version.txt
+          adb shell getprop ro.build.version.sdk | tee emulator-api-level.txt
+          adb shell getprop ro.product.cpu.abi | tee emulator-abi.txt
+
+      - name: Download current public APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$APK_NAME"
+          test -s "$APK_NAME"
+          sha256sum "$APK_NAME" | tee downloaded-apk-sha256.txt
+
+      - name: Install APK using PackageManager
+        shell: bash
+        run: |
+          set +e
+          adb install --user 0 -r -t "$APK_NAME" 2>&1 | tee adb-install-output.txt
+          CODE=${PIPESTATUS[0]}
+          set -e
+          if [ "$CODE" -ne 0 ]; then
+            echo "Android PackageManager rejected APK with exit code $CODE" >&2
+            exit "$CODE"
+          fi
+          adb shell pm path "$PACKAGE_NAME" | tee package-path.txt
+          adb shell dumpsys package "$PACKAGE_NAME" | grep -E 'versionCode=|versionName=' | head -n 4 | tee package-version.txt
+
+      - name: Capture install diagnostics
+        if: always()
+        shell: bash
+        run: |
+          adb shell dumpsys package "$PACKAGE_NAME" > package-dumpsys.txt 2>&1 || true
+          adb shell logcat -d -b all | grep -Ei 'PackageInstaller|PackageManager|INSTALL_|healthbridge|com.example.healthbridge' | tail -n 1000 > package-install-logcat.txt || true
+          tail -n 600 emulator.log > emulator-tail.txt 2>/dev/null || true
+
+      - name: Upload install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthbridge-real-install-api-${{ matrix.api }}
+          path: |
+            adb-install-output.txt
+            package-path.txt
+            package-version.txt
+            package-dumpsys.txt
+            package-install-logcat.txt
+            emulator-tail.txt
+            emulator-android-version.txt
+            emulator-api-level.txt
+            emulator-abi.txt
+            downloaded-apk-sha256.txt
+          if-no-files-found: ignore
+          retention-days: 7
