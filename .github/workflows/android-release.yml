@@ -17,13 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.3.4
-  APK_NAME: HealthBridge-v0.3.4.apk
-  CHECKSUM_NAME: HealthBridge-v0.3.4.sha256
-  SOURCE_NAME: health-bridge-v0.3.4-source.zip
+  RELEASE_TAG: v0.3.5
+  APK_NAME: HealthBridge-v0.3.5.apk
+  CHECKSUM_NAME: HealthBridge-v0.3.5.sha256
+  SOURCE_NAME: health-bridge-v0.3.5-source.zip
   PACKAGE_NAME: com.personal.healthbridge.reinstall
-  VERSION_CODE: "10"
-  VERSION_NAME: "0.3.4"
+  VERSION_CODE: "11"
+  VERSION_NAME: "0.3.5"
   EXPECTED_PUBLIC_CERT_SHA256: "98ec08ec0640003688d3c99a608cba45c75c0caea33e63d286fc640e4f454292"
   EXPECTED_PUBLIC_CERT_SHA1: "e31ae124f93d06f1784fac1f1eb6241b08bf7af2"
 
@@ -134,8 +134,8 @@ jobs:
               dist/zipalign-verification.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "Health Bridge 0.3.4" \
-              --notes "Collision-free public baseline. This release uses the new application ID com.personal.healthbridge.reinstall and the persistent public signing identity. Public 0.3.4 and later remain compatible for in-place updates. APK native libraries are 16KB zip-aligned."
+              --title "Health Bridge 0.3.5" \
+              --notes "In-place update from public 0.3.4. Keeps the same application ID and persistent public signing identity. Google Sheets connection now confirms a real account access-token grant before enabling synchronization. APK native libraries remain 16KB zip-aligned."
           fi
 
       - name: Read back and verify published release
@@ -161,6 +161,14 @@ jobs:
           grep -q "versionCode='$VERSION_CODE'" "$GITHUB_WORKSPACE/release-badging-readback.txt"
           grep -q "versionName='$VERSION_NAME'" "$GITHUB_WORKSPACE/release-badging-readback.txt"
 
+      - name: Upload verified installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthBridge-v0.3.5-verified-apk
+          path: dist/HealthBridge-v0.3.5.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Record public release self-test
         shell: bash
         run: |
@@ -180,19 +188,20 @@ jobs:
             "unit_tests": "success",
             "signed_apk": "verified",
             "release_readback": "verified",
-            "private_to_public_reinstall_required": true,
+            "update_from_public_0_3_4_supported": true,
             "future_public_updates_supported": true,
             "external_private_repo_dependency": false,
             "repository_secret_name": "HEALTHBRIDGE_PUBLIC_SIGNING_BUNDLE_BASE64",
-            "google_oauth_package": "$PACKAGE_NAME",
-            "google_oauth_registration": "requires_external_console_verification",
+            "google_authorization_mode": "account-picker-googleauthutil-direct-token",
+            "google_android_client_id_embedded": false,
+            "google_authorization_runtime_e2e": "requires_device_account_confirmation",
             "completed_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/release-selftest-report.json
-          git commit -m 'Record public Health Bridge 0.3.4 verification'
+          git commit -m 'Record public Health Bridge 0.3.5 verification'
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git rebase origin/main
