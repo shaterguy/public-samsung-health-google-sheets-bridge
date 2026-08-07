@@ -15,9 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RELEASE_TAG: v0.3.3
-  APK_NAME: HealthBridge-v0.3.3.apk
-  PACKAGE_NAME: com.example.healthbridge
+  RELEASE_TAG: v0.3.4
+  APK_NAME: HealthBridge-v0.3.4.apk
+  PACKAGE_NAME: com.personal.healthbridge.reinstall
   AVD_NAME: healthbridge-install-diagnostic-v3
 
 jobs:
@@ -127,7 +127,7 @@ jobs:
         shell: bash
         run: |
           adb shell dumpsys package "$PACKAGE_NAME" > package-dumpsys.txt 2>&1 || true
-          adb shell logcat -d -b all | grep -Ei 'PackageInstaller|PackageManager|INSTALL_|healthbridge|com.example.healthbridge' | tail -n 1200 > package-install-logcat.txt || true
+          adb shell logcat -d -b all | grep -Ei 'PackageInstaller|PackageManager|INSTALL_|healthbridge|com.personal.healthbridge.reinstall' | tail -n 1200 > package-install-logcat.txt || true
           tail -n 500 emulator.log > emulator-tail.txt 2>/dev/null || true
 
       - name: Record result
@@ -145,6 +145,9 @@ jobs:
           cat > .github/install-smoke-v3-result.json <<EOF
           {
             "run_id": "$GITHUB_RUN_ID",
+            "release_tag": "$RELEASE_TAG",
+            "apk_name": "$APK_NAME",
+            "package": "$PACKAGE_NAME",
             "status": "$STATUS",
             "boot_result": "$BOOT_RESULT",
             "android_api": "$API_LEVEL",
@@ -157,16 +160,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/install-smoke-v3-result.json
           git commit -m 'Record Android 16 install diagnostic v3' || exit 0
-          git fetch origin main
-          git rebase origin/main
-          git push origin HEAD:main
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
 
-      - name: Upload diagnostics
+      - name: Upload diagnostics and verified APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: healthbridge-install-diagnostic-v3
           path: |
+            HealthBridge-v0.3.4.apk
             adb-install-output.txt
             adb-install-exit-code.txt
             package-path.txt
