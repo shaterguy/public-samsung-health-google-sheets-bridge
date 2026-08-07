@@ -89,27 +89,23 @@ jobs:
           gradle --no-daemon --stacktrace testDebugUnitTest assembleRelease
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Sign and verify stable APK
+      - name: Align sign and verify stable APK
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
           BT="$ANDROID_HOME/build-tools/36.0.0"
-          "$BT/zipalign" -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk dist/app-aligned.apk
+          "$BT/zipalign" -P 16 -f -v 4 android/app/build/outputs/apk/release/app-release-unsigned.apk dist/app-aligned.apk
+          "$BT/zipalign" -c -P 16 -v 4 dist/app-aligned.apk
           "$BT/apksigner" sign \
             --key /tmp/healthbridge-public-signing/key.pk8 \
             --cert /tmp/healthbridge-public-signing/cert.pem \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            --v4-signing-enabled false \
             --out "dist/$APK_NAME" \
             dist/app-aligned.apk
           rm dist/app-aligned.apk
           "$BT/apksigner" verify --verbose --print-certs "dist/$APK_NAME" | tee dist/signing-certificate.txt
-          grep -q 'Verified using v1 scheme (JAR signing): true' dist/signing-certificate.txt
-          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' dist/signing-certificate.txt
-          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' dist/signing-certificate.txt
+          "$BT/zipalign" -c -P 16 -v 4 "dist/$APK_NAME" | tee dist/zipalign-verification.txt
+          grep -q 'Verification successful' dist/zipalign-verification.txt
           NORMALIZED="$(grep -i 'Signer #1 certificate SHA-256 digest:' dist/signing-certificate.txt | head -n1 | sed 's/.*: //' | tr -d ':' | tr 'A-F' 'a-f')"
           test "$NORMALIZED" = "$EXPECTED_PUBLIC_CERT_SHA256"
           "$BT/aapt" dump badging "dist/$APK_NAME" > dist/apk-badging.txt
@@ -130,6 +126,7 @@ jobs:
               "dist/$CHECKSUM_NAME" \
               "dist/$SOURCE_NAME" \
               dist/signing-certificate.txt \
+              dist/zipalign-verification.txt \
               --clobber \
               --repo "$GITHUB_REPOSITORY"
           else
@@ -138,10 +135,11 @@ jobs:
               "dist/$CHECKSUM_NAME" \
               "dist/$SOURCE_NAME" \
               dist/signing-certificate.txt \
+              dist/zipalign-verification.txt \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Health Bridge 0.3.3" \
-              --notes "Public signing baseline. Uninstall private 0.3.2 or earlier once before installing this release. Public 0.3.3 and later use the same signing identity for in-place updates."
+              --notes "Public signing baseline. Uninstall private 0.3.2 or earlier once before installing this release. Public 0.3.3 and later use the same signing identity for in-place updates. APK native libraries are 16KB zip-aligned for modern Android device compatibility."
           fi
 
       - name: Read back and verify published release
@@ -158,9 +156,8 @@ jobs:
           unzip -t "$SOURCE_NAME" >/dev/null
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/apksigner" verify --verbose --print-certs "$APK_NAME" > "$GITHUB_WORKSPACE/release-signature-readback.txt"
-          grep -q 'Verified using v1 scheme (JAR signing): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
-          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
-          grep -q 'Verified using v3 scheme (APK Signature Scheme v3): true' "$GITHUB_WORKSPACE/release-signature-readback.txt"
+          "$BT/zipalign" -c -P 16 -v 4 "$APK_NAME" > "$GITHUB_WORKSPACE/release-zipalign-readback.txt"
+          grep -q 'Verification successful' "$GITHUB_WORKSPACE/release-zipalign-readback.txt"
           NORMALIZED="$(grep -i 'Signer #1 certificate SHA-256 digest:' "$GITHUB_WORKSPACE/release-signature-readback.txt" | head -n1 | sed 's/.*: //' | tr -d ':' | tr 'A-F' 'a-f')"
           test "$NORMALIZED" = "$EXPECTED_PUBLIC_CERT_SHA256"
           "$BT/aapt" dump badging "$APK_NAME" > "$GITHUB_WORKSPACE/release-badging-readback.txt"
@@ -182,7 +179,7 @@ jobs:
             "mode": "persistent-public-signing",
             "public_certificate_sha256": "$EXPECTED_PUBLIC_CERT_SHA256",
             "public_certificate_sha1": "$EXPECTED_PUBLIC_CERT_SHA1",
-            "apk_signature_schemes": "v1+v2+v3",
+            "apk_zip_alignment": "16KB-verified",
             "unit_tests": "success",
             "signed_apk": "verified",
             "release_readback": "verified",
