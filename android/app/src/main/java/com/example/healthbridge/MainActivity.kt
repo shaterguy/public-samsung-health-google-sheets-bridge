@@ -1,12 +1,12 @@
 package com.example.healthbridge
 
+import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,13 +42,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.healthbridge.sheets.GoogleAuthorization
 import com.example.healthbridge.sync.SyncPolicy
-import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
+import com.google.android.gms.common.AccountPicker
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var vm: MainViewModel
+    private var pendingGoogleAccount: String? = null
 
     private val permissionLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -56,21 +61,25 @@ class MainActivity : ComponentActivity() {
         vm.refresh()
     }
 
-    private val googleAuthorizationLauncher = registerForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
+    private val googleAccountLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val data = result.data
-        if (result.resultCode == Activity.RESULT_OK && data != null) {
-            runCatching {
-                Identity.getAuthorizationClient(this)
-                    .getAuthorizationResultFromIntent(data)
-            }.onSuccess(vm::onGoogleAuthorized)
-                .onFailure {
-                    vm.onGoogleAuthorizationError(
-                        "Google Sheets 승인 실패: ${it.message}"
-                    )
-                }
+        val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+        if (result.resultCode == Activity.RESULT_OK && !accountName.isNullOrBlank()) {
+            authorizeGoogleAccount(accountName)
         } else {
+            vm.onGoogleAuthorizationError("Google 계정 선택이 취소되었습니다.")
+        }
+    }
+
+    private val googleConsentLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val accountName = pendingGoogleAccount
+        if (result.resultCode == Activity.RESULT_OK && !accountName.isNullOrBlank()) {
+            authorizeGoogleAccount(accountName)
+        } else {
+            pendingGoogleAccount = null
             vm.onGoogleAuthorizationError("Google Sheets 승인이 취소되었습니다.")
         }
     }
@@ -113,27 +122,36 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestGoogleAuthorization() {
-        Identity.getAuthorizationClient(this)
-            .authorize(GoogleAuthorization.request())
-            .addOnSuccessListener { result ->
-                if (result.hasResolution()) {
-                    val pendingIntent = result.pendingIntent
-                    if (pendingIntent == null) {
-                        vm.onGoogleAuthorizationError("Google 승인 화면을 열 수 없습니다.")
-                    } else {
-                        googleAuthorizationLauncher.launch(
-                            IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                        )
-                    }
+        val options = AccountPicker.AccountChooserOptions.Builder()
+            .setAllowableAccountsTypes(listOf(GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE))
+            .setAlwaysShowAccountPicker(true)
+            .build()
+        googleAccountLauncher.launch(AccountPicker.newChooseAccountIntent(options))
+    }
+
+    private fun authorizeGoogleAccount(accountName: String) {
+        pendingGoogleAccount = accountName
+        lifecycleScope.launch {
+            try {
+                GoogleAuthorization.accessToken(this@MainActivity, accountName)
+                pendingGoogleAccount = null
+                vm.onGoogleAuthorized(accountName)
+            } catch (error: UserRecoverableAuthException) {
+                @Suppress("DEPRECATION")
+                val recoveryIntent: Intent? = error.intent
+                if (recoveryIntent != null) {
+                    googleConsentLauncher.launch(recoveryIntent)
                 } else {
-                    vm.onGoogleAuthorized(result)
+                    pendingGoogleAccount = null
+                    vm.onGoogleAuthorizationError("Google Sheets 승인 화면을 열 수 없습니다.")
                 }
-            }
-            .addOnFailureListener {
+            } catch (error: Exception) {
+                pendingGoogleAccount = null
                 vm.onGoogleAuthorizationError(
-                    "Google Sheets 연결 실패: ${it.message}"
+                    "Google Sheets 연결 실패: ${error.message ?: error.javaClass.simpleName}"
                 )
             }
+        }
     }
 }
 
