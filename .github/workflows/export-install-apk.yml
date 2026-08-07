@@ -1,0 +1,67 @@
+name: Export Verified Install APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/export-install-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: v0.3.3
+  APK_NAME: HealthBridge-v0.3.3.apk
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download verified release APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$APK_NAME" --dir out
+          test -s "out/$APK_NAME"
+          sha256sum "out/$APK_NAME" | tee out/apk.sha256
+
+      - name: Upload install artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthbridge-v0.3.3-install
+          path: |
+            out/HealthBridge-v0.3.3.apk
+            out/apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record artifact run
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH="$(sha256sum out/$APK_NAME | awk '{print $1}')"
+          cat > .github/export-apk-run.json <<EOF
+          {
+            "run_id": "$GITHUB_RUN_ID",
+            "release_tag": "$RELEASE_TAG",
+            "apk_name": "$APK_NAME",
+            "apk_sha256": "$HASH",
+            "source": "verified-release"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/export-apk-run.json
+          git commit -m 'Record verified install APK export'
+          git pull --rebase origin main
+          git push origin HEAD:main
