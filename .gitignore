@@ -1,0 +1,22 @@
+.idea/
+.gradle/
+**/build/
+local.properties
+*.iml
+.kotlin/
+dist/
+
+# Health data, local databases and private configuration must never be committed.
+.env
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Android signing material and build artifacts.
+*.apk
+*.aab
+*.jks
+*.keystore
+*.pem
+*.pk8
